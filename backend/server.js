@@ -125,8 +125,21 @@ const Booking = mongoose.model('Booking', bookingSchema);
 
 const app = express();
 
-// Allow the separate frontend origin to call this API with the session cookie.
-app.use(cors({ origin: FRONTEND_ORIGIN, credentials: true }));
+// Allow the frontend to call this API with the session cookie. Accept the
+// configured origin, local dev, and any *.vercel.app URL (Vercel gives each
+// deploy/preview a different subdomain, so a single fixed origin isn't enough).
+const corsOrigin = (origin, cb) => {
+  if (
+    !origin || // same-origin or non-browser (curl, health checks)
+    origin === FRONTEND_ORIGIN ||
+    /^http:\/\/localhost:\d+$/.test(origin) ||
+    /\.vercel\.app$/.test(origin)
+  ) {
+    return cb(null, true);
+  }
+  cb(new Error('Not allowed by CORS: ' + origin));
+};
+app.use(cors({ origin: corsOrigin, credentials: true }));
 app.use(express.json());
 // In production the frontend (Vercel) and backend (Render) are different
 // sites, so the session cookie must be SameSite=None + Secure to be sent on
