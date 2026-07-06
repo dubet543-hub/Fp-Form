@@ -4,7 +4,7 @@
 // In production (Vercel) set VITE_API_BASE to the deployed backend URL
 // (e.g. https://fp-form-backend.onrender.com). In local dev it falls back
 // to localhost:3001 to stay same-site with the Vite dev server.
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:3001';
+const API_BASE = (import.meta.env.VITE_API_BASE || '').replace(/\/+$/, '');
 
 const state = { me: { loggedIn: false }, options: null };
 
