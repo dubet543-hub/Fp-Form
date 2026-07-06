@@ -406,7 +406,6 @@ async function viewBooking(id, created) {
         <div class="card-actions">
           <button class="btn btn-sm" id="pdfBtn">Download PDF (A4)</button>
           <a class="btn btn-sm btn-ghost" href="#/form">New Booking</a>
-          <button class="btn btn-sm btn-danger" id="delBtn">Delete</button>
         </div>
       </div>
       <p class="subtitle">Submitted by <strong>${esc(b.submitted_by)}</strong> · ${esc(new Date(b.created_at).toLocaleString())}</p>
@@ -414,12 +413,6 @@ async function viewBooking(id, created) {
     </div>`;
 
   document.getElementById('pdfBtn').onclick = () => printBooking(b);
-  document.getElementById('delBtn').onclick = async () => {
-    if (!confirm(`Delete Booking No ${series}? This cannot be undone.`)) return;
-    const { ok } = await api('/bookings/' + b.id, { method: 'DELETE' });
-    if (ok) location.hash = '#/bookings';
-    else alert('Could not delete the booking.');
-  };
 }
 
 // Opens a print-friendly A4 window and triggers the browser print dialog.

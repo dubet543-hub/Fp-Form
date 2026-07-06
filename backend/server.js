@@ -250,18 +250,6 @@ app.get(
   })
 );
 
-app.delete(
-  '/api/bookings/:id',
-  authRequired,
-  wrap(async (req, res) => {
-    const result = await Booking.deleteOne({ seq: Number(req.params.id) });
-    if (result.deletedCount === 0) {
-      return res.status(404).json({ error: 'Booking not found' });
-    }
-    res.json({ ok: true });
-  })
-);
-
 app.post(
   '/api/bookings',
   authRequired,

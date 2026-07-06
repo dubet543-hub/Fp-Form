@@ -251,12 +251,6 @@ label.inline input { width: auto; }
     border: 1px solid var(--border);
 }
 .btn-ghost:hover { background: var(--bg); }
-.btn-danger {
-    background: #fff;
-    color: var(--error);
-    border: 1px solid #fecaca;
-}
-.btn-danger:hover { background: var(--error); color: #fff; }
 
 .success-banner { padding: 1.5rem; }
 
