@@ -14,6 +14,10 @@
 
 const path = require('path');
 const http = require('http');
+// Prefer IPv4 for outbound connections. Some hosts (e.g. Render's free tier)
+// have no outbound IPv6 route, so resolving the SMTP host to an IPv6 address
+// first causes ENETUNREACH. This forces IPv4-first DNS resolution.
+require('dns').setDefaultResultOrder('ipv4first');
 // Load environment variables from backend/.env
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 
