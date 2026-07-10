@@ -5,9 +5,9 @@
   "type": "commonjs",
   "main": "backend/server.js",
   "scripts": {
-    "free-ports": "bash free-ports.sh",
-    "prestart": "bash free-ports.sh",
-    "predev": "bash free-ports.sh",
+    "free-ports": "node free-ports.js",
+    "prestart": "node free-ports.js",
+    "predev": "node free-ports.js",
     "start": "concurrently -n backend,frontend -c blue,green \"npm:start:backend\" \"npm:start:frontend\"",
     "dev": "concurrently -n backend,frontend -c blue,green \"npm:dev:backend\" \"npm:dev:frontend\"",
     "start:backend": "node backend/server.js",
