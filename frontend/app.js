@@ -21,15 +21,15 @@ function loadBranch() {
 
 const state = { me: { loggedIn: false }, options: null, branch: loadBranch() };
 
-function setBranch(key) {
-  if (!BRANCHES.some((b) => b.key === key) || key === state.branch) return;
+function selectBranch(key) {
+  if (!BRANCHES.some((b) => b.key === key)) return;
   state.branch = key;
   try { localStorage.setItem('fp_branch', key); } catch (e) { /* ignore */ }
-  renderNav();
-  // Switching venue always drops back to the New Booking form for that venue.
-  const alreadyOnForm = location.hash === '#/form' || location.hash === '' || location.hash === '#/';
-  if (alreadyOnForm) route(); // hash unchanged fires no hashchange event
-  else location.hash = '#/form';
+  location.hash = '#/form';
+}
+
+function branchLabel(key) {
+  return (BRANCHES.find((b) => b.key === key) || BRANCHES[0]).label;
 }
 
 const $app = document.getElementById('app');
@@ -67,25 +67,6 @@ function opts(list, selected) {
 
 // --- Nav --------------------------------------------------------------------
 
-function renderVenueTabs() {
-  return `
-    <div class="tabs venue-tabs">
-      ${BRANCHES.map(
-        (b) =>
-          `<a href="#" class="tab${b.key === state.branch ? ' active' : ''}" data-branch="${b.key}">${esc(b.label)}</a>`
-      ).join('')}
-    </div>`;
-}
-
-function bindVenueTabs(root) {
-  root.querySelectorAll('[data-branch]').forEach((el) => {
-    el.onclick = (e) => {
-      e.preventDefault();
-      setBranch(el.dataset.branch);
-    };
-  });
-}
-
 function renderNav() {
   // Which page (tab) is currently active, derived from the route.
   const path = (location.hash.slice(1).split('?')[0]) || '/';
@@ -94,20 +75,16 @@ function renderNav() {
 
   if (state.me.loggedIn) {
     $nav.innerHTML = `
-      <div class="nav-stack">
-        ${renderVenueTabs()}
-        <div class="nav-row">
-          <div class="tabs">
-            <a href="#/form" class="tab${isForm ? ' active' : ''}">New Booking</a>
-            <a href="#/bookings" class="tab${isBookings ? ' active' : ''}">Bookings</a>
-          </div>
-          <div class="nav-right">
-            <span class="nav-user">${esc(state.me.username)}</span>
-            <a href="#" id="logout" class="logout-link">Logout</a>
-          </div>
-        </div>
+      <div class="tabs">
+        <a href="#/form" class="tab${isForm ? ' active' : ''}">New Booking</a>
+        <a href="#/bookings" class="tab${isBookings ? ' active' : ''}">Bookings</a>
+      </div>
+      <div class="nav-right">
+        <span class="nav-venue">${esc(branchLabel(state.branch))}</span>
+        <a href="#/select" class="switch-venue-link">Switch Venue</a>
+        <span class="nav-user">${esc(state.me.username)}</span>
+        <a href="#" id="logout" class="logout-link">Logout</a>
       </div>`;
-    bindVenueTabs($nav);
     document.getElementById('logout').onclick = async (e) => {
       e.preventDefault();
       await api('/logout', { method: 'POST' });
@@ -118,6 +95,26 @@ function renderNav() {
   } else {
     $nav.innerHTML = `<div class="tabs"><a href="#/login" class="tab active">Login</a></div>`;
   }
+}
+
+// Post-login (and "Switch Venue") screen: two big boxes, one per property.
+function viewVenueSelect() {
+  $app.innerHTML = `
+    <div class="card center">
+      <h1>Select Venue</h1>
+      <p class="subtitle">Choose which property you're booking for.</p>
+      <div class="venue-grid">
+        ${BRANCHES.map(
+          (b) =>
+            `<button type="button" class="venue-box${b.key === state.branch ? ' active' : ''}" data-branch="${b.key}">
+              ${esc(b.label)}
+            </button>`
+        ).join('')}
+      </div>
+    </div>`;
+  $app.querySelectorAll('[data-branch]').forEach((el) => {
+    el.onclick = () => selectBranch(el.dataset.branch);
+  });
 }
 
 // --- Views ------------------------------------------------------------------
@@ -179,10 +176,11 @@ function viewLogin(msg) {
     });
     if (ok) {
       state.me = { loggedIn: true, username: data.username };
-      // If the hash is already '#/form' (the login form is shown there),
-      // changing it fires no hashchange event, so render the form directly.
-      if (location.hash === '#/form') route();
-      else location.hash = '#/form';
+      // After login, always land on the venue picker. If the hash is
+      // already '#/select' (e.g. the login form was shown there), changing
+      // it fires no hashchange event, so render directly instead.
+      if (location.hash === '#/select') route();
+      else location.hash = '#/select';
     } else {
       showErr((data && data.error) || 'Login failed.');
     }
@@ -275,15 +273,11 @@ function populateForm(b) {
   if (dateEl) dateEl.removeAttribute('min');
 }
 
-function branchLabel(key) {
-  return (BRANCHES.find((b) => b.key === key) || BRANCHES[0]).label;
-}
-
 function viewForm(editBooking) {
   const o = state.options;
   const editing = !!editBooking;
-  // Editing keeps the booking's original venue regardless of the currently
-  // selected tab; a new booking uses whichever venue tab is active.
+  // Editing keeps the booking's original venue; a new booking uses whichever
+  // venue was picked on the Select Venue screen.
   const branch = editing ? editBooking.branch || 'Amravti' : state.branch;
   const bookingNo = editing
     ? (esc(editBooking.series_no) || String(editBooking.id).padStart(3, '0'))
@@ -639,13 +633,14 @@ async function route() {
     return;
   }
 
+  if (path === '/select') return viewVenueSelect();
   if (path === '/' || path === '/form') return viewForm();
   if (path === '/bookings') return viewBookings();
   const em = path.match(/^\/booking\/(\d+)\/edit$/);
   if (em) return viewEditBooking(em[1]);
   const m = path.match(/^\/booking\/(\d+)$/);
   if (m) return viewBooking(m[1], /created=1/.test(query || ''));
-  if (path === '/login') return (location.hash = '#/form');
+  if (path === '/login') return (location.hash = '#/select');
   viewForm();
 }
 

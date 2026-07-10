@@ -34,9 +34,7 @@ body {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    min-height: 60px;
-    padding-top: 0.6rem;
-    padding-bottom: 0.6rem;
+    height: 60px;
 }
 .brand {
     font-weight: 700;
@@ -44,18 +42,8 @@ body {
     color: var(--primary);
     text-decoration: none;
 }
-/* Two stacked rows: venue tabs, then page tabs + right-side user area */
+/* Page tabs (New Booking / Bookings) + right-side user area */
 .site-header nav {
-    display: flex;
-    align-items: center;
-}
-.nav-stack {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 0.5rem;
-}
-.nav-row {
     display: flex;
     align-items: center;
     gap: 1.5rem;
@@ -63,16 +51,6 @@ body {
 .tabs {
     display: flex;
     gap: 0.35rem;
-}
-/* Venue tabs use a lighter/outlined style to stay visually secondary to the
-   page tabs (New Booking / Bookings) below them. */
-.venue-tabs .tab {
-    padding: 0.3rem 0.75rem;
-    font-size: 0.85rem;
-    border: 1px solid var(--border);
-}
-.venue-tabs .tab.active {
-    border-color: var(--primary);
 }
 .tab {
     padding: 0.45rem 1rem;
@@ -99,6 +77,17 @@ body {
     font-size: 0.9rem;
     font-weight: 600;
 }
+.nav-venue {
+    color: var(--muted);
+    font-size: 0.9rem;
+}
+.switch-venue-link {
+    color: var(--primary);
+    text-decoration: none;
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+.switch-venue-link:hover { text-decoration: underline; }
 .logout-link {
     color: var(--muted);
     text-decoration: none;
@@ -108,6 +97,36 @@ body {
 @media (max-width: 560px) {
     .site-header .container { height: auto; padding-top: 0.6rem; padding-bottom: 0.6rem; flex-wrap: wrap; gap: 0.5rem; }
     .site-header nav { gap: 0.75rem; flex-wrap: wrap; }
+}
+
+/* Post-login "Select Venue" screen: two big clickable boxes. */
+.venue-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.25rem;
+    max-width: 560px;
+    margin: 1.5rem auto 0;
+}
+.venue-box {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 2.5rem 1.25rem;
+    border: 2px solid var(--border);
+    border-radius: 12px;
+    background: #fff;
+    color: var(--text);
+    font-size: 1.1rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s, transform 0.1s;
+}
+.venue-box:hover { border-color: var(--primary); background: var(--bg); }
+.venue-box:active { transform: scale(0.98); }
+.venue-box.active { border-color: var(--primary); color: var(--primary); }
+@media (max-width: 560px) {
+    .venue-grid { grid-template-columns: 1fr; }
 }
 
 .card {
