@@ -34,7 +34,9 @@ body {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    height: 60px;
+    min-height: 60px;
+    padding-top: 0.6rem;
+    padding-bottom: 0.6rem;
 }
 .brand {
     font-weight: 700;
@@ -42,8 +44,18 @@ body {
     color: var(--primary);
     text-decoration: none;
 }
-/* Page tabs (New Booking / Bookings) + right-side user area */
+/* Two stacked rows: venue tabs, then page tabs + right-side user area */
 .site-header nav {
+    display: flex;
+    align-items: center;
+}
+.nav-stack {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.5rem;
+}
+.nav-row {
     display: flex;
     align-items: center;
     gap: 1.5rem;
@@ -51,6 +63,16 @@ body {
 .tabs {
     display: flex;
     gap: 0.35rem;
+}
+/* Venue tabs use a lighter/outlined style to stay visually secondary to the
+   page tabs (New Booking / Bookings) below them. */
+.venue-tabs .tab {
+    padding: 0.3rem 0.75rem;
+    font-size: 0.85rem;
+    border: 1px solid var(--border);
+}
+.venue-tabs .tab.active {
+    border-color: var(--primary);
 }
 .tab {
     padding: 0.45rem 1rem;

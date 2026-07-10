@@ -41,6 +41,10 @@ function val(v) {
   return s || '—';
 }
 
+function venueName(branch) {
+  return branch === 'Nagpur' ? 'Centre Point Nagpur' : 'Centre Point Amravti';
+}
+
 /**
  * @param {object} b  a booking (plain object, e.g. Booking.toJSON()).
  * @returns {Promise<Buffer>}
@@ -61,7 +65,7 @@ function renderBookingPdf(b) {
 
     // --- Header --------------------------------------------------------------
     doc.fillColor('#111').font('Helvetica-Bold').fontSize(18)
-      .text('Centre Point Amravti', left, doc.y, { continued: false });
+      .text(venueName(b.branch), left, doc.y, { continued: false });
     doc.font('Helvetica').fontSize(10).fillColor('#333')
       .text('Function Booking Form');
 

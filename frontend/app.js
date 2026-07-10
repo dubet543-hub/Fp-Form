@@ -6,7 +6,31 @@
 // to localhost:3001 to stay same-site with the Vite dev server.
 const API_BASE = (import.meta.env.VITE_API_BASE || '').replace(/\/+$/, '');
 
-const state = { me: { loggedIn: false }, options: null };
+const BRANCHES = [
+  { key: 'Amravti', label: 'Centre Point Amravti' },
+  { key: 'Nagpur', label: 'Centre Point Nagpur' },
+];
+
+function loadBranch() {
+  try {
+    const v = localStorage.getItem('fp_branch');
+    if (BRANCHES.some((b) => b.key === v)) return v;
+  } catch (e) { /* ignore storage errors */ }
+  return 'Amravti';
+}
+
+const state = { me: { loggedIn: false }, options: null, branch: loadBranch() };
+
+function setBranch(key) {
+  if (!BRANCHES.some((b) => b.key === key) || key === state.branch) return;
+  state.branch = key;
+  try { localStorage.setItem('fp_branch', key); } catch (e) { /* ignore */ }
+  renderNav();
+  // Switching venue always drops back to the New Booking form for that venue.
+  const alreadyOnForm = location.hash === '#/form' || location.hash === '' || location.hash === '#/';
+  if (alreadyOnForm) route(); // hash unchanged fires no hashchange event
+  else location.hash = '#/form';
+}
 
 const $app = document.getElementById('app');
 const $nav = document.getElementById('nav');
@@ -43,6 +67,25 @@ function opts(list, selected) {
 
 // --- Nav --------------------------------------------------------------------
 
+function renderVenueTabs() {
+  return `
+    <div class="tabs venue-tabs">
+      ${BRANCHES.map(
+        (b) =>
+          `<a href="#" class="tab${b.key === state.branch ? ' active' : ''}" data-branch="${b.key}">${esc(b.label)}</a>`
+      ).join('')}
+    </div>`;
+}
+
+function bindVenueTabs(root) {
+  root.querySelectorAll('[data-branch]').forEach((el) => {
+    el.onclick = (e) => {
+      e.preventDefault();
+      setBranch(el.dataset.branch);
+    };
+  });
+}
+
 function renderNav() {
   // Which page (tab) is currently active, derived from the route.
   const path = (location.hash.slice(1).split('?')[0]) || '/';
@@ -51,14 +94,20 @@ function renderNav() {
 
   if (state.me.loggedIn) {
     $nav.innerHTML = `
-      <div class="tabs">
-        <a href="#/form" class="tab${isForm ? ' active' : ''}">New Booking</a>
-        <a href="#/bookings" class="tab${isBookings ? ' active' : ''}">Bookings</a>
-      </div>
-      <div class="nav-right">
-        <span class="nav-user">${esc(state.me.username)}</span>
-        <a href="#" id="logout" class="logout-link">Logout</a>
+      <div class="nav-stack">
+        ${renderVenueTabs()}
+        <div class="nav-row">
+          <div class="tabs">
+            <a href="#/form" class="tab${isForm ? ' active' : ''}">New Booking</a>
+            <a href="#/bookings" class="tab${isBookings ? ' active' : ''}">Bookings</a>
+          </div>
+          <div class="nav-right">
+            <span class="nav-user">${esc(state.me.username)}</span>
+            <a href="#" id="logout" class="logout-link">Logout</a>
+          </div>
+        </div>
       </div>`;
+    bindVenueTabs($nav);
     document.getElementById('logout').onclick = async (e) => {
       e.preventDefault();
       await api('/logout', { method: 'POST' });
@@ -226,16 +275,23 @@ function populateForm(b) {
   if (dateEl) dateEl.removeAttribute('min');
 }
 
+function branchLabel(key) {
+  return (BRANCHES.find((b) => b.key === key) || BRANCHES[0]).label;
+}
+
 function viewForm(editBooking) {
   const o = state.options;
   const editing = !!editBooking;
+  // Editing keeps the booking's original venue regardless of the currently
+  // selected tab; a new booking uses whichever venue tab is active.
+  const branch = editing ? editBooking.branch || 'Amravti' : state.branch;
   const bookingNo = editing
     ? (esc(editBooking.series_no) || String(editBooking.id).padStart(3, '0'))
     : 'Auto (e.g. 001)';
   $app.innerHTML = `
     <div class="card">
       <h1>${editing ? 'Edit Booking No ' + bookingNo : 'Function Booking Form'}</h1>
-      <p class="subtitle">Submitted by <strong>${esc(state.me.username)}</strong></p>
+      <p class="subtitle">${esc(branchLabel(branch))} &middot; Submitted by <strong>${esc(state.me.username)}</strong></p>
       <div class="alert" id="formErr" style="display:none"></div>
       <form id="bookingForm" novalidate>
         <div class="grid">
@@ -358,6 +414,7 @@ function viewForm(editBooking) {
         payload[k] = v;
       }
     }
+    payload.branch = branch;
     const { ok, data } = await api(editing ? '/bookings/' + editBooking.id : '/bookings', {
       method: editing ? 'PUT' : 'POST',
       body: JSON.stringify(payload),
@@ -388,9 +445,9 @@ async function viewBookings() {
   $app.innerHTML = `
     <div class="card">
       <div class="card-head"><h1>Bookings</h1></div>
-      <p class="subtitle">Loading bookings…</p>
+      <p class="subtitle">Loading ${esc(branchLabel(state.branch))} bookings…</p>
     </div>`;
-  const { ok, data } = await api('/bookings');
+  const { ok, data } = await api('/bookings?branch=' + encodeURIComponent(state.branch));
   if (!ok) return (location.hash = '#/login');
   const rows = data
     .map(
@@ -413,6 +470,7 @@ async function viewBookings() {
         <h1>Bookings</h1>
         <a class="btn btn-sm" href="#/form">New Booking</a>
       </div>
+      <p class="subtitle">${esc(branchLabel(state.branch))}</p>
       ${
         data.length
           ? `<table class="bookings-table">
@@ -421,7 +479,7 @@ async function viewBookings() {
               <th>By</th></tr></thead>
               <tbody>${rows}</tbody></table>
              <p class="hint">Tip: click any row to view or download the booking.</p>`
-          : `<p class="subtitle">No bookings yet. <a href="#/form">Create the first one</a>.</p>`
+          : `<p class="subtitle">No bookings yet for ${esc(branchLabel(state.branch))}. <a href="#/form">Create the first one</a>.</p>`
       }
     </div>`;
 
@@ -496,7 +554,7 @@ async function viewBooking(id, created) {
           <a class="btn btn-sm btn-ghost" href="#/form">New Booking</a>
         </div>
       </div>
-      <p class="subtitle">Submitted by <strong>${esc(b.submitted_by)}</strong> · ${esc(new Date(b.created_at).toLocaleString())}</p>
+      <p class="subtitle">${esc(branchLabel(b.branch))} &middot; Submitted by <strong>${esc(b.submitted_by)}</strong> · ${esc(new Date(b.created_at).toLocaleString())}</p>
       ${sections}
     </div>`;
 
@@ -536,8 +594,9 @@ function printBooking(b) {
             : `<td></td><td></td></tr>`)
       )
       .join('');
+  const venue = esc(branchLabel(b.branch));
   const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
-    <title>Booking #${b.id} — Centre Point Amravti</title>
+    <title>Booking #${b.id} — ${venue}</title>
     <style>
       @page { size: A4; margin: 14mm; }
       body { font-family: Arial, sans-serif; color:#111; font-size:12px; }
@@ -548,7 +607,7 @@ function printBooking(b) {
       td.k { width:22%; color:#555; font-weight:bold; }
     </style></head><body>
     <div class="head">
-      <div><h1>Centre Point Amravti</h1><div>Function Booking Form</div></div>
+      <div><h1>${venue}</h1><div>Function Booking Form</div></div>
       <div class="meta">Booking No ${series}<br>${b.reservation_no ? 'Res. No: ' + esc(b.reservation_no) + '<br>' : ''}Submitted by: ${esc(b.submitted_by)}<br>Timestamp: ${esc(new Date(b.created_at).toLocaleString())}</div>
     </div>
     <h2>Function Prospectus</h2><table>${kv([['Date','date','Type of Function','function_type'],['Venue','venue','MG','mg'],['Expected Pax','expected_pax','Time Slot','time_slot'],['Menu','menu']])}</table>

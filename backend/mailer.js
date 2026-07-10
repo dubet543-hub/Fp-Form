@@ -12,15 +12,51 @@
 const nodemailer = require('nodemailer');
 const { renderBookingPdf } = require('./pdf');
 
-const RECIPIENTS = (process.env.MAIL_RECIPIENTS || '')
-  .split(',')
-  .map((s) => s.trim())
-  .filter(Boolean);
+// Fallback recipient list for Centre Point Nagpur bookings, used only if
+// MAIL_RECIPIENTS_NAGPUR isn't set in the environment.
+const DEFAULT_NAGPUR_RECIPIENTS = [
+  'cfo@cpgh.in',
+  'sales2.nagpur@cpgh.in',
+  'exechef.nagpur@cpgh.in',
+  'accounts@centrepointnagpur.com',
+  'fnbcontroller.nagpur@cpgh.in',
+  'fnb.nagpur@cpgh.in',
+  'gm.nagpur@cpgh.in',
+  'angadh.arora@cpgh.in',
+  'arjun.arora@cpgh.in',
+  'do@cpgh.in',
+  'ea@cpgh.in',
+];
+
+function parseList(envVal) {
+  return (envVal || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+const RECIPIENTS_AMRAVTI = parseList(
+  process.env.MAIL_RECIPIENTS_AMRAVTI || process.env.MAIL_RECIPIENTS
+);
+const RECIPIENTS_NAGPUR = process.env.MAIL_RECIPIENTS_NAGPUR
+  ? parseList(process.env.MAIL_RECIPIENTS_NAGPUR)
+  : DEFAULT_NAGPUR_RECIPIENTS;
+
+// Kept for backward compatibility (e.g. anything importing RECIPIENTS directly).
+const RECIPIENTS = RECIPIENTS_AMRAVTI;
+
+function recipientsFor(branch) {
+  return branch === 'Nagpur' ? RECIPIENTS_NAGPUR : RECIPIENTS_AMRAVTI;
+}
+
+function venueName(branch) {
+  return branch === 'Nagpur' ? 'Centre Point Nagpur' : 'Centre Point Amravti';
+}
 
 let transporter = null;
 
-function isConfigured() {
-  return Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && RECIPIENTS.length);
+function isConfigured(branch) {
+  return Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && recipientsFor(branch).length);
 }
 
 function getTransporter() {
@@ -44,10 +80,11 @@ function getTransporter() {
  */
 async function sendBookingEmail(booking) {
   const series = booking.series_no || String(booking.id ?? booking.seq ?? '');
-  if (!isConfigured()) {
+  const recipients = recipientsFor(booking.branch);
+  if (!isConfigured(booking.branch)) {
     console.warn(
       `[mail] SMTP not configured — skipped emailing booking ${series}. ` +
-        'Set SMTP_HOST/SMTP_USER/SMTP_PASS and MAIL_RECIPIENTS in backend/.env.'
+        'Set SMTP_HOST/SMTP_USER/SMTP_PASS and MAIL_RECIPIENTS_AMRAVTI/MAIL_RECIPIENTS_NAGPUR in backend/.env.'
     );
     return { sent: false, reason: 'not-configured' };
   }
@@ -60,14 +97,14 @@ async function sendBookingEmail(booking) {
 
     const info = await getTransporter().sendMail({
       from: process.env.MAIL_FROM || process.env.SMTP_USER,
-      to: RECIPIENTS,
+      to: recipients,
       subject: `Function Booking ${series} — ${booking.party_name || ''} (${booking.date || ''})`.trim(),
       text: bookingSummaryText(booking, series),
       attachments: [{ filename: fileName, content: pdf, contentType: 'application/pdf' }],
     });
 
-    console.log(`[mail] Booking ${series} emailed to ${RECIPIENTS.length} recipients (id: ${info.messageId})`);
-    return { sent: true, messageId: info.messageId, recipients: RECIPIENTS.length };
+    console.log(`[mail] Booking ${series} emailed to ${recipients.length} recipients (id: ${info.messageId})`);
+    return { sent: true, messageId: info.messageId, recipients: recipients.length };
   } catch (err) {
     console.error(`[mail] Failed to email booking ${series}: ${err.message}`);
     return { sent: false, reason: err.message };
@@ -77,7 +114,7 @@ async function sendBookingEmail(booking) {
 function bookingSummaryText(b, series) {
   const line = (label, v) => (v ? `${label}: ${v}` : null);
   return [
-    `A new function booking has been recorded at Centre Point Amravti.`,
+    `A new function booking has been recorded at ${venueName(b.branch)}.`,
     ``,
     line('Booking No', series),
     line('Reservation No', b.reservation_no),
@@ -99,4 +136,4 @@ function bookingSummaryText(b, series) {
     .join('\n');
 }
 
-module.exports = { sendBookingEmail, isConfigured, RECIPIENTS };
+module.exports = { sendBookingEmail, isConfigured, RECIPIENTS, RECIPIENTS_AMRAVTI, RECIPIENTS_NAGPUR };

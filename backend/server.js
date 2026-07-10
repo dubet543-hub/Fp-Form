@@ -35,12 +35,21 @@ const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || 'http://localhost:5173';
 
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'admin';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
+
+// Centre Point Nagpur staff logins (seeded alongside the default admin —
+// see main()). Override individual passwords via env if needed.
+const EXTRA_ADMINS = {
+  veer: process.env.ADMIN_PASSWORD_VEER || 'veer@2026',
+  irfan: process.env.ADMIN_PASSWORD_IRFAN || 'irfan@2026',
+  abhishek: process.env.ADMIN_PASSWORD_ABHISHEK || 'abhishek@2026',
+};
 const SECRET_KEY = process.env.SECRET_KEY || 'change-me-in-production';
 const MONGODB_URI =
   process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/amravti_fp';
 
 // Option lists (also used by the frontend via /api/options).
 const OPTIONS = {
+  branches: ['Amravti', 'Nagpur'],
   functionTypes: ['Social', 'Corporate'],
   venues: ['Hall', 'Lawn'],
   timeSlots: [
@@ -55,7 +64,7 @@ const OPTIONS = {
 };
 
 const FIELDS = [
-  'reservation_no',
+  'branch', 'reservation_no',
   'date', 'time', 'function_type', 'venue', 'mg', 'expected_pax',
   'time_slot', 'menu',
   'party_name', 'company_name', 'gst_no', 'pan_no', 'address',
@@ -66,7 +75,7 @@ const FIELDS = [
 ];
 
 const REQUIRED = [
-  'date', 'function_type', 'venue', 'time_slot', 'menu',
+  'branch', 'date', 'function_type', 'venue', 'time_slot', 'menu',
   'party_name', 'telephone', 'rate',
 ];
 
@@ -104,6 +113,7 @@ const bookingSchema = new mongoose.Schema({
   series_no: String,
   reservation_no: String,
   submitted_by: { type: String, required: true },
+  branch: { type: String, enum: ['Amravti', 'Nagpur'], default: 'Amravti' },
   date: String, time: String, function_type: String, venue: String,
   mg: String, expected_pax: String, time_slot: String, menu: String,
   party_name: String, company_name: String, gst_no: String, pan_no: String,
@@ -243,10 +253,12 @@ app.get(
   '/api/bookings',
   authRequired,
   wrap(async (req, res) => {
-    const rows = await Booking.find()
+    const filter = {};
+    if (OPTIONS.branches.includes(req.query.branch)) filter.branch = req.query.branch;
+    const rows = await Booking.find(filter)
       .sort({ seq: -1 })
       .select(
-        'seq series_no reservation_no submitted_by date time function_type venue party_name telephone created_at'
+        'seq series_no reservation_no submitted_by branch date time function_type venue party_name telephone created_at'
       );
     res.json(rows.map((r) => r.toJSON()));
   })
@@ -281,6 +293,9 @@ function parseBookingBody(body, { checkPastDate }) {
   for (const key of REQUIRED) {
     if (!data[key]) errors[key] = 'This field is required.';
   }
+  if (data.branch && !OPTIONS.branches.includes(data.branch)) {
+    errors.branch = 'Invalid branch.';
+  }
   if (data.email && (!data.email.includes('@') || !data.email.includes('.'))) {
     errors.email = 'Enter a valid email address.';
   }
@@ -309,12 +324,15 @@ app.post(
     }
 
     const seq = await nextSeq('bookingSeq');
+    // Each branch has its own booking-number sequence (Amravti and Nagpur
+    // both start at 001), independent of the globally unique `seq` id.
+    const branchSeq = await nextSeq(`bookingSeq_${data.branch}`);
     const booking = await Booking.create({
       ...data,
       other_charges: otherCharges.join(', '),
       submitted_by: req.session.adminUsername,
       seq,
-      series_no: seriesNo(seq),
+      series_no: seriesNo(branchSeq),
       created_at: new Date(),
     });
 
@@ -374,13 +392,25 @@ async function main() {
   await mongoose.connect(MONGODB_URI);
   console.log('✓ MongoDB connected');
 
-  // Seed the admin account if none exists.
+  // Seed the default admin account if none exists.
   if ((await Admin.countDocuments()) === 0) {
     await Admin.create({
       username: ADMIN_USERNAME,
       password_hash: bcrypt.hashSync(ADMIN_PASSWORD, 10),
     });
     console.log(`Seeded admin "${ADMIN_USERNAME}" (password: ${ADMIN_PASSWORD})`);
+  }
+
+  // Seed the Centre Point Nagpur staff accounts. Upsert (not "if empty") so
+  // this also backfills them onto an existing production DB, but never
+  // overwrites a password that's already been changed since.
+  for (const [username, password] of Object.entries(EXTRA_ADMINS)) {
+    const res = await Admin.updateOne(
+      { username },
+      { $setOnInsert: { username, password_hash: bcrypt.hashSync(password, 10) } },
+      { upsert: true }
+    );
+    if (res.upsertedCount) console.log(`Seeded admin "${username}"`);
   }
 
   const server = http.createServer(app);
