@@ -41,8 +41,14 @@ function val(v) {
   return s || '—';
 }
 
+const VENUE_NAMES = {
+  Amravti: 'Centre Point Amravti',
+  Nagpur: 'Centre Point Nagpur',
+  Pablo: 'Pablo - The Art Cafe',
+};
+
 function venueName(branch) {
-  return branch === 'Nagpur' ? 'Centre Point Nagpur' : 'Centre Point Amravti';
+  return VENUE_NAMES[branch] || VENUE_NAMES.Amravti;
 }
 
 /**

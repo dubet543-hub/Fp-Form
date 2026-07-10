@@ -36,12 +36,14 @@ const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || 'http://localhost:5173';
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'admin';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
 
-// Centre Point Nagpur staff logins (seeded alongside the default admin —
-// see main()). Override individual passwords via env if needed.
+// Nagpur/Pablo staff logins (seeded alongside the default admin — see
+// main()). Override individual passwords via env if needed.
 const EXTRA_ADMINS = {
   veer: process.env.ADMIN_PASSWORD_VEER || 'veer@2026',
   irfan: process.env.ADMIN_PASSWORD_IRFAN || 'irfan@2026',
   abhishek: process.env.ADMIN_PASSWORD_ABHISHEK || 'abhishek@2026',
+  vinod: process.env.ADMIN_PASSWORD_VINOD || 'vinod@2026',
+  tushar: process.env.ADMIN_PASSWORD_TUSHAR || 'tushar@2026',
 };
 const SECRET_KEY = process.env.SECRET_KEY || 'change-me-in-production';
 const MONGODB_URI =
@@ -49,7 +51,7 @@ const MONGODB_URI =
 
 // Option lists (also used by the frontend via /api/options).
 const OPTIONS = {
-  branches: ['Amravti', 'Nagpur'],
+  branches: ['Amravti', 'Nagpur', 'Pablo'],
   functionTypes: ['Social', 'Corporate'],
   venues: ['Hall', 'Lawn'],
   timeSlots: [
@@ -113,7 +115,7 @@ const bookingSchema = new mongoose.Schema({
   series_no: String,
   reservation_no: String,
   submitted_by: { type: String, required: true },
-  branch: { type: String, enum: ['Amravti', 'Nagpur'], default: 'Amravti' },
+  branch: { type: String, enum: ['Amravti', 'Nagpur', 'Pablo'], default: 'Amravti' },
   date: String, time: String, function_type: String, venue: String,
   mg: String, expected_pax: String, time_slot: String, menu: String,
   party_name: String, company_name: String, gst_no: String, pan_no: String,

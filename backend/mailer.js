@@ -28,6 +28,19 @@ const DEFAULT_NAGPUR_RECIPIENTS = [
   'ea@cpgh.in',
 ];
 
+// Fallback recipient list for Pablo - The Art Cafe bookings, used only if
+// MAIL_RECIPIENTS_PABLO isn't set in the environment.
+const DEFAULT_PABLO_RECIPIENTS = [
+  'rm.pablo@cpgh.in',
+  'chef.ufo@cpgh.in',
+  'accounts.ufo@cpgh.in',
+  'fo.units1@cpgh.in',
+  'angadh.arora@cpgh.in',
+  'arjun.arora@cpgh.in',
+  'fnbcontroller.nagpur@cpgh.in',
+  'digital@cpgh.in',
+];
+
 function parseList(envVal) {
   return (envVal || '')
     .split(',')
@@ -41,16 +54,30 @@ const RECIPIENTS_AMRAVTI = parseList(
 const RECIPIENTS_NAGPUR = process.env.MAIL_RECIPIENTS_NAGPUR
   ? parseList(process.env.MAIL_RECIPIENTS_NAGPUR)
   : DEFAULT_NAGPUR_RECIPIENTS;
+const RECIPIENTS_PABLO = process.env.MAIL_RECIPIENTS_PABLO
+  ? parseList(process.env.MAIL_RECIPIENTS_PABLO)
+  : DEFAULT_PABLO_RECIPIENTS;
 
 // Kept for backward compatibility (e.g. anything importing RECIPIENTS directly).
 const RECIPIENTS = RECIPIENTS_AMRAVTI;
 
+const RECIPIENTS_BY_BRANCH = {
+  Nagpur: RECIPIENTS_NAGPUR,
+  Pablo: RECIPIENTS_PABLO,
+};
+
 function recipientsFor(branch) {
-  return branch === 'Nagpur' ? RECIPIENTS_NAGPUR : RECIPIENTS_AMRAVTI;
+  return RECIPIENTS_BY_BRANCH[branch] || RECIPIENTS_AMRAVTI;
 }
 
+const VENUE_NAMES = {
+  Amravti: 'Centre Point Amravti',
+  Nagpur: 'Centre Point Nagpur',
+  Pablo: 'Pablo - The Art Cafe',
+};
+
 function venueName(branch) {
-  return branch === 'Nagpur' ? 'Centre Point Nagpur' : 'Centre Point Amravti';
+  return VENUE_NAMES[branch] || VENUE_NAMES.Amravti;
 }
 
 let transporter = null;
@@ -84,7 +111,7 @@ async function sendBookingEmail(booking) {
   if (!isConfigured(booking.branch)) {
     console.warn(
       `[mail] SMTP not configured — skipped emailing booking ${series}. ` +
-        'Set SMTP_HOST/SMTP_USER/SMTP_PASS and MAIL_RECIPIENTS_AMRAVTI/MAIL_RECIPIENTS_NAGPUR in backend/.env.'
+        'Set SMTP_HOST/SMTP_USER/SMTP_PASS and MAIL_RECIPIENTS_AMRAVTI/MAIL_RECIPIENTS_NAGPUR/MAIL_RECIPIENTS_PABLO in backend/.env.'
     );
     return { sent: false, reason: 'not-configured' };
   }
@@ -136,4 +163,11 @@ function bookingSummaryText(b, series) {
     .join('\n');
 }
 
-module.exports = { sendBookingEmail, isConfigured, RECIPIENTS, RECIPIENTS_AMRAVTI, RECIPIENTS_NAGPUR };
+module.exports = {
+  sendBookingEmail,
+  isConfigured,
+  RECIPIENTS,
+  RECIPIENTS_AMRAVTI,
+  RECIPIENTS_NAGPUR,
+  RECIPIENTS_PABLO,
+};

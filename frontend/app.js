@@ -9,6 +9,7 @@ const API_BASE = (import.meta.env.VITE_API_BASE || '').replace(/\/+$/, '');
 const BRANCHES = [
   { key: 'Amravti', label: 'Centre Point Amravti' },
   { key: 'Nagpur', label: 'Centre Point Nagpur' },
+  { key: 'Pablo', label: 'Pablo - The Art Cafe' },
 ];
 
 function loadBranch() {
