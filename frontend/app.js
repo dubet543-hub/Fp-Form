@@ -10,6 +10,8 @@ const BRANCHES = [
   { key: 'Amravti', label: 'Centre Point Amravti' },
   { key: 'Nagpur', label: 'Centre Point Nagpur' },
   { key: 'Pablo', label: 'Pablo - The Art Cafe' },
+  { key: 'NaviMumbai', label: 'Centre Point Navi Mumbai' },
+  { key: 'Dali', label: 'Dali' },
 ];
 
 function loadBranch() {

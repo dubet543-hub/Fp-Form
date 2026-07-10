@@ -2,8 +2,8 @@
  * Email delivery for booking PDFs, via the cpgh.in SMTP mail server.
  *
  * All connection details come from backend/.env (see .env.example):
- *   SMTP_HOST, SMTP_PORT, SMTP_SECURE, SMTP_USER, SMTP_PASS,
- *   MAIL_FROM, MAIL_RECIPIENTS
+ *   SMTP_HOST, SMTP_PORT, SMTP_SECURE, SMTP_USER, SMTP_PASS, MAIL_FROM,
+ *   and one MAIL_RECIPIENTS_<BRANCH> list per venue (see BRANCH_CONFIG below).
  *
  * If SMTP is not configured, sending is skipped with a warning so that
  * booking creation itself never fails because of mail problems.
@@ -12,35 +12,6 @@
 const nodemailer = require('nodemailer');
 const { renderBookingPdf } = require('./pdf');
 
-// Fallback recipient list for Centre Point Nagpur bookings, used only if
-// MAIL_RECIPIENTS_NAGPUR isn't set in the environment.
-const DEFAULT_NAGPUR_RECIPIENTS = [
-  'cfo@cpgh.in',
-  'sales2.nagpur@cpgh.in',
-  'exechef.nagpur@cpgh.in',
-  'accounts@centrepointnagpur.com',
-  'fnbcontroller.nagpur@cpgh.in',
-  'fnb.nagpur@cpgh.in',
-  'gm.nagpur@cpgh.in',
-  'angadh.arora@cpgh.in',
-  'arjun.arora@cpgh.in',
-  'do@cpgh.in',
-  'ea@cpgh.in',
-];
-
-// Fallback recipient list for Pablo - The Art Cafe bookings, used only if
-// MAIL_RECIPIENTS_PABLO isn't set in the environment.
-const DEFAULT_PABLO_RECIPIENTS = [
-  'rm.pablo@cpgh.in',
-  'chef.ufo@cpgh.in',
-  'accounts.ufo@cpgh.in',
-  'fo.units1@cpgh.in',
-  'angadh.arora@cpgh.in',
-  'arjun.arora@cpgh.in',
-  'fnbcontroller.nagpur@cpgh.in',
-  'digital@cpgh.in',
-];
-
 function parseList(envVal) {
   return (envVal || '')
     .split(',')
@@ -48,36 +19,96 @@ function parseList(envVal) {
     .filter(Boolean);
 }
 
-const RECIPIENTS_AMRAVTI = parseList(
-  process.env.MAIL_RECIPIENTS_AMRAVTI || process.env.MAIL_RECIPIENTS
-);
-const RECIPIENTS_NAGPUR = process.env.MAIL_RECIPIENTS_NAGPUR
-  ? parseList(process.env.MAIL_RECIPIENTS_NAGPUR)
-  : DEFAULT_NAGPUR_RECIPIENTS;
-const RECIPIENTS_PABLO = process.env.MAIL_RECIPIENTS_PABLO
-  ? parseList(process.env.MAIL_RECIPIENTS_PABLO)
-  : DEFAULT_PABLO_RECIPIENTS;
-
-// Kept for backward compatibility (e.g. anything importing RECIPIENTS directly).
-const RECIPIENTS = RECIPIENTS_AMRAVTI;
-
-const RECIPIENTS_BY_BRANCH = {
-  Nagpur: RECIPIENTS_NAGPUR,
-  Pablo: RECIPIENTS_PABLO,
+// One entry per branch: display name, MAIL_RECIPIENTS_* env var name, and a
+// fallback recipient list used only if that env var isn't set.
+const BRANCH_CONFIG = {
+  Amravti: {
+    name: 'Centre Point Amravti',
+    envVar: 'MAIL_RECIPIENTS_AMRAVTI',
+    // MAIL_RECIPIENTS is kept as a legacy alias for Amravti's recipients.
+    legacyEnvVar: 'MAIL_RECIPIENTS',
+    defaultRecipients: [],
+  },
+  Nagpur: {
+    name: 'Centre Point Nagpur',
+    envVar: 'MAIL_RECIPIENTS_NAGPUR',
+    defaultRecipients: [
+      'cfo@cpgh.in',
+      'sales2.nagpur@cpgh.in',
+      'exechef.nagpur@cpgh.in',
+      'accounts@centrepointnagpur.com',
+      'fnbcontroller.nagpur@cpgh.in',
+      'fnb.nagpur@cpgh.in',
+      'gm.nagpur@cpgh.in',
+      'angadh.arora@cpgh.in',
+      'arjun.arora@cpgh.in',
+      'do@cpgh.in',
+      'ea@cpgh.in',
+    ],
+  },
+  Pablo: {
+    name: 'Pablo - The Art Cafe',
+    envVar: 'MAIL_RECIPIENTS_PABLO',
+    defaultRecipients: [
+      'rm.pablo@cpgh.in',
+      'chef.ufo@cpgh.in',
+      'accounts.ufo@cpgh.in',
+      'fo.units1@cpgh.in',
+      'angadh.arora@cpgh.in',
+      'arjun.arora@cpgh.in',
+      'fnbcontroller.nagpur@cpgh.in',
+      'digital@cpgh.in',
+    ],
+  },
+  NaviMumbai: {
+    name: 'Centre Point Navi Mumbai',
+    envVar: 'MAIL_RECIPIENTS_NAVIMUMBAI',
+    defaultRecipients: [
+      'gm.navimumbai@cpgh.in',
+      'fnb.navimumbai@cpgh.in',
+      'exe.navimumbai@cpgh.in',
+      'accounts.navimumbai@cpgh.in',
+      'fo.units1@cpgh.in',
+      'angadh.arora@cpgh.in',
+      'arjun.arora@cpgh.in',
+      'fnbcontroller.nagpur@cpgh.in',
+      'digital@cpgh.in',
+    ],
+  },
+  Dali: {
+    name: 'Dali',
+    envVar: 'MAIL_RECIPIENTS_DALI',
+    defaultRecipients: [
+      'dali@cpgh.in',
+      'natasha.arora@cpgh.in',
+      'accounts.dali@cpgh.in',
+      'fo.units1@cpgh.in',
+      'angadh.arora@cpgh.in',
+      'arjun.arora@cpgh.in',
+      'fnbcontroller.nagpur@cpgh.in',
+      'digital@cpgh.in',
+    ],
+  },
 };
 
-function recipientsFor(branch) {
-  return RECIPIENTS_BY_BRANCH[branch] || RECIPIENTS_AMRAVTI;
+const RECIPIENTS_BY_BRANCH = {};
+for (const [branch, cfg] of Object.entries(BRANCH_CONFIG)) {
+  const envVal = process.env[cfg.envVar] || (cfg.legacyEnvVar && process.env[cfg.legacyEnvVar]);
+  RECIPIENTS_BY_BRANCH[branch] = envVal ? parseList(envVal) : cfg.defaultRecipients;
 }
 
-const VENUE_NAMES = {
-  Amravti: 'Centre Point Amravti',
-  Nagpur: 'Centre Point Nagpur',
-  Pablo: 'Pablo - The Art Cafe',
-};
+// Kept for backward compatibility (e.g. anything importing RECIPIENTS directly).
+const RECIPIENTS = RECIPIENTS_BY_BRANCH.Amravti;
+const RECIPIENTS_AMRAVTI = RECIPIENTS_BY_BRANCH.Amravti;
+const RECIPIENTS_NAGPUR = RECIPIENTS_BY_BRANCH.Nagpur;
+const RECIPIENTS_PABLO = RECIPIENTS_BY_BRANCH.Pablo;
+
+function recipientsFor(branch) {
+  return RECIPIENTS_BY_BRANCH[branch] || RECIPIENTS_BY_BRANCH.Amravti;
+}
 
 function venueName(branch) {
-  return VENUE_NAMES[branch] || VENUE_NAMES.Amravti;
+  return (BRANCH_CONFIG[branch] || BRANCH_CONFIG.Amravti).name;
 }
 
 let transporter = null;
@@ -111,7 +142,7 @@ async function sendBookingEmail(booking) {
   if (!isConfigured(booking.branch)) {
     console.warn(
       `[mail] SMTP not configured — skipped emailing booking ${series}. ` +
-        'Set SMTP_HOST/SMTP_USER/SMTP_PASS and MAIL_RECIPIENTS_AMRAVTI/MAIL_RECIPIENTS_NAGPUR/MAIL_RECIPIENTS_PABLO in backend/.env.'
+        'Set SMTP_HOST/SMTP_USER/SMTP_PASS and the branch\'s MAIL_RECIPIENTS_* in backend/.env.'
     );
     return { sent: false, reason: 'not-configured' };
   }
@@ -170,4 +201,5 @@ module.exports = {
   RECIPIENTS_AMRAVTI,
   RECIPIENTS_NAGPUR,
   RECIPIENTS_PABLO,
+  RECIPIENTS_BY_BRANCH,
 };

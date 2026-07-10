@@ -41,10 +41,13 @@ function val(v) {
   return s || '—';
 }
 
+// Kept in sync with backend/mailer.js → BRANCH_CONFIG's `name` fields.
 const VENUE_NAMES = {
   Amravti: 'Centre Point Amravti',
   Nagpur: 'Centre Point Nagpur',
   Pablo: 'Pablo - The Art Cafe',
+  NaviMumbai: 'Centre Point Navi Mumbai',
+  Dali: 'Dali',
 };
 
 function venueName(branch) {
