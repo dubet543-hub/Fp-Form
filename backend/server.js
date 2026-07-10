@@ -36,20 +36,23 @@ const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || 'http://localhost:5173';
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'admin';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
 
-// Nagpur/Pablo/Navi Mumbai/Dali staff logins (seeded alongside the default
-// admin — see main()). Override individual passwords via env if needed.
+// Per-venue staff logins (seeded/synced alongside the default admin — see
+// main()). Each is locked to its `branch` — they can only open/view/submit
+// that venue's form. Override individual passwords via env if needed. The
+// default ADMIN_USERNAME account has no branch, i.e. it can see every venue.
 const EXTRA_ADMINS = {
-  veer: process.env.ADMIN_PASSWORD_VEER || 'veer@2026',
-  irfan: process.env.ADMIN_PASSWORD_IRFAN || 'irfan@2026',
-  abhishek: process.env.ADMIN_PASSWORD_ABHISHEK || 'abhishek@2026',
-  vinod: process.env.ADMIN_PASSWORD_VINOD || 'vinod@2026',
-  tushar: process.env.ADMIN_PASSWORD_TUSHAR || 'tushar@2026',
-  shabbir: process.env.ADMIN_PASSWORD_SHABBIR || 'shabbir@2026',
-  tarneem: process.env.ADMIN_PASSWORD_TARNEEM || 'tarneem@2026',
-  umesh: process.env.ADMIN_PASSWORD_UMESH || 'umesh@2026',
-  ravi: process.env.ADMIN_PASSWORD_RAVI || 'ravi@2026',
-  sandeep: process.env.ADMIN_PASSWORD_SANDEEP || 'sandeep@2026',
-  narendra: process.env.ADMIN_PASSWORD_NARENDRA || 'narendra@2026',
+  kashish: { password: process.env.ADMIN_PASSWORD_KASHISH || 'kashish@2026', branch: 'Amravti' },
+  veer: { password: process.env.ADMIN_PASSWORD_VEER || 'veer@2026', branch: 'Nagpur' },
+  irfan: { password: process.env.ADMIN_PASSWORD_IRFAN || 'irfan@2026', branch: 'Nagpur' },
+  abhishek: { password: process.env.ADMIN_PASSWORD_ABHISHEK || 'abhishek@2026', branch: 'Nagpur' },
+  vinod: { password: process.env.ADMIN_PASSWORD_VINOD || 'vinod@2026', branch: 'Pablo' },
+  tushar: { password: process.env.ADMIN_PASSWORD_TUSHAR || 'tushar@2026', branch: 'Pablo' },
+  shabbir: { password: process.env.ADMIN_PASSWORD_SHABBIR || 'shabbir@2026', branch: 'NaviMumbai' },
+  tarneem: { password: process.env.ADMIN_PASSWORD_TARNEEM || 'tarneem@2026', branch: 'NaviMumbai' },
+  umesh: { password: process.env.ADMIN_PASSWORD_UMESH || 'umesh@2026', branch: 'NaviMumbai' },
+  ravi: { password: process.env.ADMIN_PASSWORD_RAVI || 'ravi@2026', branch: 'NaviMumbai' },
+  sandeep: { password: process.env.ADMIN_PASSWORD_SANDEEP || 'sandeep@2026', branch: 'Dali' },
+  narendra: { password: process.env.ADMIN_PASSWORD_NARENDRA || 'narendra@2026', branch: 'Dali' },
 };
 const SECRET_KEY = process.env.SECRET_KEY || 'change-me-in-production';
 const MONGODB_URI =
@@ -92,6 +95,8 @@ const REQUIRED = [
 const adminSchema = new mongoose.Schema({
   username: { type: String, unique: true, required: true },
   password_hash: { type: String, required: true },
+  // Which venue this admin is locked to (null = unrestricted, sees all venues).
+  branch: { type: String, enum: OPTIONS.branches, default: null },
 });
 const Admin = mongoose.model('Admin', adminSchema);
 
@@ -197,6 +202,12 @@ function authRequired(req, res, next) {
   next();
 }
 
+// True if the logged-in admin may access the given venue: either they're
+// unrestricted (no branch on their account), or it matches their branch.
+function branchAllowed(req, branch) {
+  return !req.session.adminBranch || req.session.adminBranch === branch;
+}
+
 // Wrap async route handlers so rejections become 500s instead of crashes.
 const wrap = (fn) => (req, res, next) => fn(req, res, next).catch(next);
 
@@ -234,7 +245,8 @@ app.post(
     if (admin && bcrypt.compareSync(password, admin.password_hash)) {
       req.session.adminId = String(admin._id);
       req.session.adminUsername = admin.username;
-      return res.json({ ok: true, username: admin.username });
+      req.session.adminBranch = admin.branch || null;
+      return res.json({ ok: true, username: admin.username, branch: admin.branch || null });
     }
     res.status(401).json({ error: 'Invalid username or password.' });
   })
@@ -246,7 +258,11 @@ app.post('/api/logout', (req, res) => {
 
 app.get('/api/me', (req, res) => {
   if (req.session.adminId) {
-    return res.json({ loggedIn: true, username: req.session.adminUsername });
+    return res.json({
+      loggedIn: true,
+      username: req.session.adminUsername,
+      branch: req.session.adminBranch || null,
+    });
   }
   res.json({ loggedIn: false });
 });
@@ -262,7 +278,10 @@ app.get(
   authRequired,
   wrap(async (req, res) => {
     const filter = {};
-    if (OPTIONS.branches.includes(req.query.branch)) filter.branch = req.query.branch;
+    // A branch-locked admin only ever sees their own venue's bookings,
+    // regardless of what ?branch= is requested.
+    if (req.session.adminBranch) filter.branch = req.session.adminBranch;
+    else if (OPTIONS.branches.includes(req.query.branch)) filter.branch = req.query.branch;
     const rows = await Booking.find(filter)
       .sort({ seq: -1 })
       .select(
@@ -278,6 +297,9 @@ app.get(
   wrap(async (req, res) => {
     const booking = await Booking.findOne({ seq: Number(req.params.id) });
     if (!booking) return res.status(404).json({ error: 'Booking not found' });
+    if (!branchAllowed(req, booking.branch)) {
+      return res.status(403).json({ error: 'Not allowed for your venue.' });
+    }
     res.json(booking.toJSON());
   })
 );
@@ -324,7 +346,12 @@ app.post(
   '/api/bookings',
   authRequired,
   wrap(async (req, res) => {
-    const { data, otherCharges, errors } = parseBookingBody(req.body || {}, {
+    // A branch-locked admin can only ever create bookings for their own
+    // venue — override whatever the client sent rather than trusting it.
+    const body = { ...req.body };
+    if (req.session.adminBranch) body.branch = req.session.adminBranch;
+
+    const { data, otherCharges, errors } = parseBookingBody(body, {
       checkPastDate: true,
     });
     if (Object.keys(errors).length > 0) {
@@ -358,8 +385,13 @@ app.put(
   wrap(async (req, res) => {
     const booking = await Booking.findOne({ seq: Number(req.params.id) });
     if (!booking) return res.status(404).json({ error: 'Booking not found' });
+    if (!branchAllowed(req, booking.branch)) {
+      return res.status(403).json({ error: 'Not allowed for your venue.' });
+    }
 
-    const { data, otherCharges, errors } = parseBookingBody(req.body || {}, {
+    // A booking's venue never changes on edit — keep whatever it already was.
+    const body = { ...req.body, branch: booking.branch };
+    const { data, otherCharges, errors } = parseBookingBody(body, {
       checkPastDate: false,
     });
     if (Object.keys(errors).length > 0) {
@@ -380,6 +412,9 @@ app.post(
   wrap(async (req, res) => {
     const booking = await Booking.findOne({ seq: Number(req.params.id) });
     if (!booking) return res.status(404).json({ error: 'Booking not found' });
+    if (!branchAllowed(req, booking.branch)) {
+      return res.status(403).json({ error: 'Not allowed for your venue.' });
+    }
 
     const result = await sendBookingEmail(booking.toJSON());
     if (result.sent) {
@@ -409,16 +444,21 @@ async function main() {
     console.log(`Seeded admin "${ADMIN_USERNAME}" (password: ${ADMIN_PASSWORD})`);
   }
 
-  // Seed the Centre Point Nagpur staff accounts. Upsert (not "if empty") so
-  // this also backfills them onto an existing production DB, but never
-  // overwrites a password that's already been changed since.
-  for (const [username, password] of Object.entries(EXTRA_ADMINS)) {
+  // Seed/sync the per-venue staff accounts. Upsert (not "if empty") so this
+  // also backfills them onto an existing production DB. `branch` is always
+  // kept in sync with EXTRA_ADMINS (so a venue reassignment here takes
+  // effect on next boot), but the password is only set on first insert —
+  // it never overwrites a password that's already been changed since.
+  for (const [username, { password, branch }] of Object.entries(EXTRA_ADMINS)) {
     const res = await Admin.updateOne(
       { username },
-      { $setOnInsert: { username, password_hash: bcrypt.hashSync(password, 10) } },
+      {
+        $set: { branch },
+        $setOnInsert: { username, password_hash: bcrypt.hashSync(password, 10) },
+      },
       { upsert: true }
     );
-    if (res.upsertedCount) console.log(`Seeded admin "${username}"`);
+    if (res.upsertedCount) console.log(`Seeded admin "${username}" (branch: ${branch})`);
   }
 
   const server = http.createServer(app);

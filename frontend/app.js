@@ -84,7 +84,11 @@ function renderNav() {
       </div>
       <div class="nav-right">
         <span class="nav-venue">${esc(branchLabel(state.branch))}</span>
-        <a href="#/select" class="switch-venue-link">Switch Venue</a>
+        ${
+          state.me.branch
+            ? ''
+            : `<a href="#/select" class="switch-venue-link">Switch Venue</a>`
+        }
         <span class="nav-user">${esc(state.me.username)}</span>
         <a href="#" id="logout" class="logout-link">Logout</a>
       </div>`;
@@ -102,6 +106,12 @@ function renderNav() {
 
 // Post-login (and "Switch Venue") screen: two big boxes, one per property.
 function viewVenueSelect() {
+  // A branch-locked admin has nothing to pick — send them straight to their
+  // one venue's form instead.
+  if (state.me.branch) {
+    state.branch = state.me.branch;
+    return (location.hash = '#/form');
+  }
   $app.innerHTML = `
     <div class="card center">
       <h1>Select Venue</h1>
@@ -178,12 +188,16 @@ function viewLogin(msg) {
       body: JSON.stringify({ username, password }),
     });
     if (ok) {
-      state.me = { loggedIn: true, username: data.username };
-      // After login, always land on the venue picker. If the hash is
-      // already '#/select' (e.g. the login form was shown there), changing
-      // it fires no hashchange event, so render directly instead.
-      if (location.hash === '#/select') route();
-      else location.hash = '#/select';
+      state.me = { loggedIn: true, username: data.username, branch: data.branch || null };
+      // A branch-locked admin has only one venue, so skip the picker and go
+      // straight to its form; everyone else lands on "Select Venue".
+      if (state.me.branch) state.branch = state.me.branch;
+      const dest = state.me.branch ? '#/form' : '#/select';
+      // If the hash is already the destination (e.g. the login form was
+      // shown there), changing it fires no hashchange event, so render
+      // directly instead.
+      if (location.hash === dest) route();
+      else location.hash = dest;
     } else {
       showErr((data && data.error) || 'Login failed.');
     }
@@ -514,10 +528,21 @@ const DETAIL_SECTIONS = [
   ]],
 ];
 
+// Shows a friendly error card in place of a login redirect for 403s (the
+// user is logged in fine, they just can't see another venue's booking).
+function viewForbidden() {
+  $app.innerHTML = `
+    <div class="card center">
+      <h1>Not available</h1>
+      <p class="subtitle">This booking belongs to a different venue.</p>
+      <a class="btn" href="#/bookings">Back to Bookings</a>
+    </div>`;
+}
+
 async function viewBooking(id, created) {
   $app.innerHTML = `<div class="card"><p class="subtitle">Loading booking…</p></div>`;
-  const { ok, data } = await api('/bookings/' + id);
-  if (!ok) return (location.hash = '#/login');
+  const { ok, status, data } = await api('/bookings/' + id);
+  if (!ok) return status === 403 ? viewForbidden() : (location.hash = '#/login');
   const b = data;
   const series = esc(b.series_no) || String(b.id).padStart(3, '0');
   const sections = DETAIL_SECTIONS.map(
@@ -573,8 +598,8 @@ async function viewBooking(id, created) {
 // Loads a booking, then opens the form pre-filled for editing.
 async function viewEditBooking(id) {
   $app.innerHTML = `<div class="card"><p class="subtitle">Loading booking…</p></div>`;
-  const { ok, data } = await api('/bookings/' + id);
-  if (!ok) return (location.hash = '#/login');
+  const { ok, status, data } = await api('/bookings/' + id);
+  if (!ok) return status === 403 ? viewForbidden() : (location.hash = '#/login');
   viewForm(data);
 }
 
@@ -656,6 +681,9 @@ async function init() {
   ]);
   state.me = me;
   state.options = options;
+  // A branch-locked admin always uses their assigned venue, overriding
+  // whatever a previous user on this browser had selected.
+  if (state.me.branch) state.branch = state.me.branch;
   renderNav();
   window.addEventListener('hashchange', route);
   route();
