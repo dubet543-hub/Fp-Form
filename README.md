@@ -21,6 +21,8 @@ auto-generated series number (`001`, `002`, …) and a timestamp.
 - The FP form only opens **after** a successful admin login
 - Full booking form with sections: Function Prospectus, Party Details, Billing,
   Additional Services, Instructions
+- **Save as draft**: park an unfinished form, come back later, add the rest and
+  submit it (see *Drafts* below)
 - Server-side validation with inline error messages
 - Bookings persisted to **MongoDB** via Mongoose
 - Auto-incrementing series number (`001`+) via an atomic Mongo counter
@@ -68,7 +70,13 @@ function-booking/
 | GET    | `/api/options`      | —    | Property name + option lists   |
 | GET    | `/api/bookings`     | ✓    | List bookings                  |
 | GET    | `/api/bookings/:id` | ✓    | One booking                    |
-| POST   | `/api/bookings`     | ✓    | Create a booking (validated)   |
+| POST   | `/api/bookings`     | ✓    | Create a booking or draft      |
+| PUT    | `/api/bookings/:id` | ✓    | Edit, or submit a draft        |
+| GET    | `/api/bookings/:id/pdf`    | ✓ | Download the A4 PDF         |
+| POST   | `/api/bookings/:id/resend` | ✓ | Re-send the booking email   |
+
+`POST`/`PUT` treat `"status": "draft"` in the body as a draft save; anything
+else is a full submission.
 
 ## Setup & run
 
@@ -126,6 +134,31 @@ to the active venue, so an account or session from another venue is rejected.
    "Download PDF (A4)" option.
 4. `/submissions` lists all bookings.
 5. `/logout` clears the session and returns to the login page.
+
+## Drafts
+
+A booking that isn't ready to go out can be saved as a **draft** with the
+"Save as Draft" button next to "Submit & Save Booking".
+
+- **Nothing is mandatory** in a draft except at least one filled-in field, so a
+  half-completed form is never lost. The usual required fields are only
+  enforced when it is submitted.
+- **Drafts are never emailed.** The internal recipient list is only mailed when
+  the booking is submitted, and "Resend Email" is refused for a draft.
+- **A draft carries no booking number.** The next series number is issued at
+  submission, so the numbered series has no gaps left by abandoned drafts.
+- **A draft's PDF can still be downloaded** and is stamped `DRAFT` diagonally
+  across the page, with "DRAFT (not submitted)" in the header, so a working
+  copy cannot be mistaken for a confirmed booking.
+- The bookings list marks each row Draft or Submitted and can be filtered to
+  either. Open a draft to continue editing it or submit it.
+- Submitting turns the draft into a normal booking: it takes the next series
+  number and is emailed exactly like one created in a single sitting. A
+  submitted booking cannot be turned back into a draft.
+
+Existing databases are migrated automatically on the first start: every record
+that predates drafts is marked submitted and keeps its series number, and
+numbering continues from where it left off.
 
 ## Configuration (`backend/.env`)
 

@@ -271,7 +271,7 @@ label.inline input { width: auto; }
     gap: 1rem;
     flex-wrap: wrap;
 }
-.card-actions { display: flex; gap: 0.6rem; }
+.card-actions { display: flex; gap: 0.6rem; flex-wrap: wrap; }
 .btn-sm { padding: 0.45rem 0.9rem; font-size: 0.9rem; }
 .btn-ghost {
     background: #fff;
@@ -331,3 +331,58 @@ body.wide main.container { max-width: 1180px; }
     padding: 1.5rem 0;
     text-align: center;
 }
+
+/* --- Drafts ---------------------------------------------------------------
+   A draft is an unfinished booking: saved, but not numbered, not emailed and
+   clearly marked everywhere it appears. */
+.badge {
+    display: inline-block;
+    padding: 0.15rem 0.55rem;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    vertical-align: middle;
+    white-space: nowrap;
+}
+.badge-draft { background: #fef3c7; color: #92400e; }
+.badge-ok { background: #dcfce7; color: #166534; }
+
+.form-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    align-items: center;
+    margin-top: 0.5rem;
+}
+.form-actions + .hint { margin-top: 0.75rem; }
+
+.filter-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin: 1rem 0 0.5rem;
+}
+.filter-btn {
+    background: #fff;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    padding: 0.35rem 0.85rem;
+    border-radius: 999px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+}
+.filter-btn:hover { background: var(--bg); }
+.filter-btn.active {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: #fff;
+}
+
+.muted-cell { color: var(--muted); }
+tr.row-draft td { background: #fffbeb; }
+tr.row-draft:hover td { background: #fef3c7; }
+.draft-banner .checkmark { background: #fef3c7; color: #b45309; }

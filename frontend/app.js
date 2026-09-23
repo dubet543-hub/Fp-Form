@@ -203,6 +203,13 @@ function viewLogin(msg) {
   };
 }
 
+// Changing the hash to its current value fires no hashchange event, so render
+// the route directly in that case.
+function goTo(hash) {
+  if (location.hash === hash) route();
+  else location.hash = hash;
+}
+
 function showErr(text) {
   const el = document.getElementById('err');
   if (el) { el.textContent = text; el.style.display = 'block'; }
@@ -253,21 +260,24 @@ function textarea(label, name, wide = true) {
     </div>`;
 }
 
+// Plain text / select / textarea fields keyed by their `name`. (Mode of
+// payment and other charges are handled separately — they are radio/checkbox
+// groups.)
+const SIMPLE_FIELDS = [
+  'reservation_no', 'date', 'function_type', 'venue', 'mg', 'expected_pax',
+  'time_slot', 'menu', 'party_name', 'company_name', 'gst_no', 'pan_no',
+  'address', 'contact_person', 'telephone', 'email', 'seating_arrangement',
+  'add_on_rooms', 'rate', 'hall_rent', 'advance_amt', 'transaction_details',
+  'board_to_read', 'details_amount', 'billing_instruction', 'housekeeping',
+  'fnb', 'kitchen',
+];
+
 // Fill the booking form's fields from an existing booking (edit mode).
 function populateForm(b) {
   const form = document.getElementById('bookingForm');
   if (!form) return;
 
-  // Plain text / select / textarea fields keyed by their `name`.
-  const simpleFields = [
-    'reservation_no', 'date', 'function_type', 'venue', 'mg', 'expected_pax',
-    'time_slot', 'menu', 'party_name', 'company_name', 'gst_no', 'pan_no',
-    'address', 'contact_person', 'telephone', 'email', 'seating_arrangement',
-    'add_on_rooms', 'rate', 'hall_rent', 'advance_amt', 'transaction_details',
-    'board_to_read', 'details_amount', 'billing_instruction', 'housekeeping',
-    'fnb', 'kitchen',
-  ];
-  simpleFields.forEach((name) => {
+  SIMPLE_FIELDS.forEach((name) => {
     const el = form.querySelector(`[name="${name}"]`);
     if (el && b[name] != null) el.value = b[name];
   });
@@ -292,13 +302,26 @@ function populateForm(b) {
 function viewForm(editBooking) {
   const o = state.options;
   const editing = !!editBooking;
-  const bookingNo = editing
-    ? (esc(editBooking.series_no) || String(editBooking.id).padStart(3, '0'))
+  // A draft is an unfinished booking: it can be saved with anything filled in
+  // so far, carries no booking number yet and has not been emailed.
+  const isDraft = editing && editBooking.status === 'draft';
+  const series = editing
+    ? esc(editBooking.series_no) || String(editBooking.id).padStart(3, '0')
+    : '';
+  const bookingNo = isDraft
+    ? 'Assigned when submitted'
+    : editing
+    ? series
     : 'Auto (e.g. 001)';
+  const heading = !editing
+    ? 'Function Booking Form'
+    : isDraft
+    ? 'Edit Draft'
+    : 'Edit Booking No ' + series;
   $app.innerHTML = `
     <div class="card">
-      <h1>${editing ? 'Edit Booking No ' + bookingNo : 'Function Booking Form'}</h1>
-      <p class="subtitle">Submitted by <strong>${esc(state.me.username)}</strong></p>
+      <h1>${heading}${isDraft ? ' <span class="badge badge-draft">Draft</span>' : ''}</h1>
+      <p class="subtitle">${isDraft ? 'Saved' : 'Submitted'} by <strong>${esc(state.me.username)}</strong></p>
       <div class="alert" id="formErr" style="display:none"></div>
       <form id="bookingForm" novalidate>
         <div class="grid">
@@ -397,7 +420,29 @@ function viewForm(editBooking) {
           ${textarea('Kitchen', 'kitchen')}
         </div>
 
-        <button type="submit" class="btn">${editing ? 'Update Booking' : 'Submit &amp; Save Booking'}</button>
+        <div class="form-actions">
+          <button type="submit" class="btn">${
+            editing
+              ? isDraft
+                ? 'Submit Booking'
+                : 'Update Booking'
+              : 'Submit &amp; Save Booking'
+          }</button>
+          ${
+            editing && !isDraft
+              ? ''
+              : `<button type="button" id="saveDraftBtn" class="btn btn-ghost">${
+                  editing ? 'Save Draft' : 'Save as Draft'
+                }</button>`
+          }
+        </div>
+        ${
+          editing && !isDraft
+            ? ''
+            : `<p class="hint">Saving a draft keeps whatever you have filled in
+               so far — nothing is required and no email is sent. The booking
+               number is issued when you submit it.</p>`
+        }
       </form>
     </div>`;
 
@@ -410,10 +455,18 @@ function viewForm(editBooking) {
     startClock();
   }
 
-  document.getElementById('bookingForm').onsubmit = async (e) => {
-    e.preventDefault();
-    const fd = new FormData(e.target);
-    const payload = {};
+  const form = document.getElementById('bookingForm');
+
+  // Both buttons save the same form; `status` decides whether this is a draft
+  // (saved as-is, no email) or a real submission (validated + emailed).
+  const save = async (status) => {
+    const saveAsDraft = status === 'draft';
+    const err = document.getElementById('formErr');
+    err.style.display = 'none';
+    form.querySelectorAll('.input-error').forEach((el) => el.classList.remove('input-error'));
+
+    const fd = new FormData(form);
+    const payload = { status };
     for (const [k, v] of fd.entries()) {
       if (k === 'other_charges') {
         (payload.other_charges = payload.other_charges || []).push(v);
@@ -426,21 +479,42 @@ function viewForm(editBooking) {
       body: JSON.stringify(payload),
     });
     if (ok) {
-      location.hash = editing
-        ? '#/booking/' + editBooking.id
-        : '#/booking/' + data.id + '?created=1';
-    } else if (data && data.errors) {
-      const el = document.getElementById('formErr');
-      el.textContent = 'Please fill in all required fields marked with *.';
-      el.style.display = 'block';
+      const id = editing ? editBooking.id : data.id;
+      // Banner: a brand new draft, a newly submitted booking, or a plain edit.
+      const flag = saveAsDraft ? '?draft=1' : editing && !isDraft ? '' : '?created=1';
+      goTo('#/booking/' + id + flag);
+      return;
+    }
+    if (data && data.errors) {
+      err.textContent = saveAsDraft
+        ? 'Could not save the draft — fill in at least one detail first.'
+        : 'Please fill in all required fields marked with *.';
+      err.style.display = 'block';
       // Highlight the missing fields.
       Object.keys(data.errors).forEach((name) => {
-        const inp = e.target.querySelector(`[name="${name}"]`);
+        const inp = form.querySelector(`[name="${name}"]`);
         if (inp) inp.classList.add('input-error');
       });
-      window.scrollTo(0, 0);
+    } else {
+      err.textContent = (data && data.error) || 'Could not save. Please try again.';
+      err.style.display = 'block';
     }
+    window.scrollTo(0, 0);
   };
+
+  form.onsubmit = (e) => {
+    e.preventDefault();
+    save('submitted');
+  };
+  const draftBtn = document.getElementById('saveDraftBtn');
+  if (draftBtn) draftBtn.onclick = () => save('draft');
+}
+
+// Status pill used in the bookings list and on a booking's page.
+function statusBadge(b) {
+  return b.status === 'draft'
+    ? '<span class="badge badge-draft">Draft</span>'
+    : '<span class="badge badge-ok">Submitted</span>';
 }
 
 async function viewBookings() {
@@ -455,21 +529,39 @@ async function viewBookings() {
     </div>`;
   const { ok, data } = await api('/bookings');
   if (!ok) return (location.hash = '#/login');
-  const rows = data
-    .map(
-      (b) => `
-      <tr class="row-link" data-id="${b.id}">
-        <td><strong>${esc(b.series_no) || String(b.id).padStart(3, '0')}</strong></td>
+
+  const drafts = data.filter((b) => b.status === 'draft');
+  const submitted = data.filter((b) => b.status !== 'draft');
+  const GROUPS = {
+    all: data,
+    draft: drafts,
+    submitted: submitted,
+  };
+  let filter = 'all';
+
+  const row = (b) => `
+      <tr class="row-link${b.status === 'draft' ? ' row-draft' : ''}" data-id="${b.id}">
+        <td>${
+          b.series_no
+            ? `<strong>${esc(b.series_no)}</strong>`
+            : '<span class="muted-cell">—</span>'
+        }</td>
+        <td>${statusBadge(b)}</td>
         <td>${esc(b.reservation_no) || '—'}</td>
-        <td class="nowrap">${esc(b.date)}</td>
-        <td>${esc(b.function_type)}</td>
-        <td>${esc(b.venue)}</td>
-        <td>${esc(b.party_name)}</td>
-        <td class="nowrap">${esc(b.telephone)}</td>
+        <td class="nowrap">${esc(b.date) || '—'}</td>
+        <td>${esc(b.function_type) || '—'}</td>
+        <td>${esc(b.venue) || '—'}</td>
+        <td>${esc(b.party_name) || '—'}</td>
+        <td class="nowrap">${esc(b.telephone) || '—'}</td>
         <td>${esc(b.submitted_by)}</td>
-      </tr>`
-    )
-    .join('');
+      </tr>`;
+
+  const filters = [
+    ['all', 'All', data.length],
+    ['draft', 'Drafts', drafts.length],
+    ['submitted', 'Submitted', submitted.length],
+  ];
+
   $app.innerHTML = `
     <div class="card">
       <div class="card-head">
@@ -478,20 +570,49 @@ async function viewBookings() {
       </div>
       ${
         data.length
-          ? `<table class="bookings-table">
-              <thead><tr><th>Series No</th><th>Res. No</th><th>Date</th>
+          ? `<div class="filter-row">
+               ${filters
+                 .map(
+                   ([key, label, count]) =>
+                     `<button type="button" class="filter-btn" data-filter="${key}">${label} (${count})</button>`
+                 )
+                 .join('')}
+             </div>
+             <table class="bookings-table">
+              <thead><tr><th>Series No</th><th>Status</th><th>Res. No</th><th>Date</th>
               <th>Type</th><th>Venue</th><th>Party</th><th>Telephone</th>
               <th>By</th></tr></thead>
-              <tbody>${rows}</tbody></table>
-             <p class="hint">Tip: click any row to view or download the booking.</p>`
+              <tbody id="bookingRows"></tbody></table>
+             <p class="hint">Tip: click any row to view or download the booking.
+             Drafts have no booking number until they are submitted.</p>`
           : `<p class="subtitle">No bookings yet. <a href="#/form">Create the first one</a>.</p>`
       }
     </div>`;
 
+  if (!data.length) return;
+
   // Whole row navigates to the booking detail — no separate "View" column.
-  $app.querySelectorAll('tr.row-link').forEach((tr) => {
-    tr.onclick = () => (location.hash = '#/booking/' + tr.dataset.id);
+  const paint = () => {
+    const rows = GROUPS[filter];
+    const body = document.getElementById('bookingRows');
+    body.innerHTML = rows.length
+      ? rows.map(row).join('')
+      : `<tr><td colspan="9" class="muted-cell">No ${filter === 'draft' ? 'drafts' : 'submitted bookings'} yet.</td></tr>`;
+    body.querySelectorAll('tr.row-link').forEach((tr) => {
+      tr.onclick = () => (location.hash = '#/booking/' + tr.dataset.id);
+    });
+    $app.querySelectorAll('.filter-btn').forEach((btn) => {
+      btn.classList.toggle('active', btn.dataset.filter === filter);
+    });
+  };
+
+  $app.querySelectorAll('.filter-btn').forEach((btn) => {
+    btn.onclick = () => {
+      filter = btn.dataset.filter;
+      paint();
+    };
   });
+  paint();
 }
 
 const DETAIL_SECTIONS = [
@@ -522,11 +643,12 @@ const DETAIL_SECTIONS = [
   ]],
 ];
 
-async function viewBooking(id, created) {
+async function viewBooking(id, banner) {
   $app.innerHTML = `<div class="card"><p class="subtitle">Loading booking…</p></div>`;
   const { ok, data } = await api('/bookings/' + id);
   if (!ok) return (location.hash = '#/login');
   const b = data;
+  const isDraft = b.status === 'draft';
   const series = esc(b.series_no) || String(b.id).padStart(3, '0');
   const sections = DETAIL_SECTIONS.map(
     ([title, rows]) => `
@@ -539,43 +661,98 @@ async function viewBooking(id, created) {
         .join('')}`
   ).join('');
 
+  const banners = {
+    created: `<div class="card center success-banner">
+                <div class="checkmark">&#10003;</div>
+                <h1>Booking saved</h1>
+                <p class="subtitle">Booking No <strong>${series}</strong> has been recorded and emailed.</p>
+              </div>`,
+    draft: `<div class="card center success-banner draft-banner">
+              <div class="checkmark">&#9998;</div>
+              <h1>Draft saved</h1>
+              <p class="subtitle">Nothing has been emailed yet. Come back any time to
+              add the rest and submit it.</p>
+            </div>`,
+  };
+
   $app.innerHTML = `
-    ${
-      created
-        ? `<div class="card center success-banner">
-             <div class="checkmark">&#10003;</div>
-             <h1>Booking saved</h1>
-             <p class="subtitle">Booking No <strong>${series}</strong> has been recorded.</p>
-           </div>`
-        : ''
-    }
+    ${banners[banner] || ''}
     <div class="card">
       <div class="card-head">
-        <h1>Booking No ${series}</h1>
+        <h1>${isDraft ? 'Draft Booking' : 'Booking No ' + series} ${statusBadge(b)}</h1>
         <div class="card-actions">
-          <button class="btn btn-sm" id="pdfBtn">Download PDF (A4)</button>
-          <button class="btn btn-sm btn-ghost" id="resendBtn">Resend Email</button>
-          <a class="btn btn-sm btn-ghost" href="#/booking/${b.id}/edit">Edit</a>
+          ${
+            isDraft
+              ? `<a class="btn btn-sm" href="#/booking/${b.id}/edit">Continue Editing</a>
+                 <button class="btn btn-sm btn-ghost" id="submitDraftBtn">Submit Booking</button>
+                 <button class="btn btn-sm btn-ghost" id="pdfBtn">Download PDF (A4)</button>`
+              : `<button class="btn btn-sm" id="pdfBtn">Download PDF (A4)</button>
+                 <button class="btn btn-sm btn-ghost" id="resendBtn">Resend Email</button>
+                 <a class="btn btn-sm btn-ghost" href="#/booking/${b.id}/edit">Edit</a>`
+          }
           <a class="btn btn-sm btn-ghost" href="#/form">New Booking</a>
         </div>
       </div>
-      <p class="subtitle">Submitted by <strong>${esc(b.submitted_by)}</strong> · ${esc(new Date(b.created_at).toLocaleString())}</p>
+      <p class="subtitle">${
+        isDraft
+          ? `Saved by <strong>${esc(b.submitted_by)}</strong> · last saved ${esc(new Date(b.updated_at || b.created_at).toLocaleString())}`
+          : `Submitted by <strong>${esc(b.submitted_by)}</strong> · ${esc(new Date(b.created_at).toLocaleString())}`
+      }</p>
+      ${
+        isDraft
+          ? `<p class="hint">This draft has no booking number yet and has not been
+             emailed. Its PDF is stamped DRAFT. Submitting it issues the next
+             booking number and sends the email.</p>`
+          : ''
+      }
       ${sections}
     </div>`;
 
   document.getElementById('pdfBtn').onclick = () => printBooking(b);
 
+  // Submit a draft straight from here, using the values already saved. If
+  // anything required is still missing, open the form so it can be completed.
+  const submitDraftBtn = document.getElementById('submitDraftBtn');
+  if (submitDraftBtn) {
+    submitDraftBtn.onclick = async () => {
+      if (!confirm('Submit this booking? It will be given a booking number and emailed to the internal recipient list.')) return;
+      submitDraftBtn.disabled = true;
+      submitDraftBtn.textContent = 'Submitting…';
+      const payload = { status: 'submitted', mode_of_payment: b.mode_of_payment || '' };
+      SIMPLE_FIELDS.forEach((key) => { payload[key] = b[key] || ''; });
+      payload.other_charges = (b.other_charges || '')
+        .split(',')
+        .map((c) => c.trim())
+        .filter(Boolean);
+      const result = await api('/bookings/' + b.id, {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      });
+      submitDraftBtn.disabled = false;
+      submitDraftBtn.textContent = 'Submit Booking';
+      if (result.ok) return goTo('#/booking/' + b.id + '?created=1');
+      alert(
+        (result.data && result.data.errors)
+          ? 'Some required details are still missing — opening the form so you can complete them.'
+          : 'Could not submit: ' + ((result.data && result.data.error) || 'unknown error')
+      );
+      if (result.data && result.data.errors) location.hash = '#/booking/' + b.id + '/edit';
+    };
+  }
+
   const resendBtn = document.getElementById('resendBtn');
-  resendBtn.onclick = async () => {
-    if (!confirm('Email this booking PDF to the internal recipient list now?')) return;
-    resendBtn.disabled = true;
-    resendBtn.textContent = 'Sending…';
-    const { ok, data } = await api('/bookings/' + b.id + '/resend', { method: 'POST' });
-    resendBtn.disabled = false;
-    resendBtn.textContent = 'Resend Email';
-    if (ok) alert(`Email sent to ${data.recipients} recipient(s).`);
-    else alert('Email failed: ' + ((data && data.error) || 'unknown error'));
-  };
+  if (resendBtn) {
+    resendBtn.onclick = async () => {
+      if (!confirm('Email this booking PDF to the internal recipient list now?')) return;
+      resendBtn.disabled = true;
+      resendBtn.textContent = 'Sending…';
+      const { ok, data } = await api('/bookings/' + b.id + '/resend', { method: 'POST' });
+      resendBtn.disabled = false;
+      resendBtn.textContent = 'Resend Email';
+      if (ok) alert(`Email sent to ${data.recipients} recipient(s).`);
+      else alert('Email failed: ' + ((data && data.error) || 'unknown error'));
+    };
+  }
 }
 
 // Loads a booking, then opens the form pre-filled for editing.
@@ -608,7 +785,7 @@ async function printBooking(b) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `Booking-${series}.pdf`;
+    a.download = b.status === 'draft' ? `Draft-${b.id}.pdf` : `Booking-${series}.pdf`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -642,7 +819,13 @@ async function route() {
   const em = path.match(/^\/booking\/(\d+)\/edit$/);
   if (em) return viewEditBooking(em[1]);
   const m = path.match(/^\/booking\/(\d+)$/);
-  if (m) return viewBooking(m[1], /created=1/.test(query || ''));
+  if (m) {
+    const q = query || '';
+    return viewBooking(
+      m[1],
+      /created=1/.test(q) ? 'created' : /draft=1/.test(q) ? 'draft' : ''
+    );
+  }
   if (path === '/login') return (location.hash = '#/form');
   viewForm();
 }

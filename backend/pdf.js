@@ -66,26 +66,49 @@ function renderBookingPdf(b) {
     // text inside the page in the normal case — this is just a backstop.)
     doc.addPage = () => doc;
 
-    const series = b.series_no || String(b.id ?? b.seq ?? '').padStart(3, '0');
+    // A draft is a working copy: it holds no series number yet and must never
+    // be mistaken for a confirmed booking, so it is stamped across the page.
+    const isDraft = b.status === 'draft';
+    const series = isDraft
+      ? ''
+      : b.series_no || String(b.id ?? b.seq ?? '').padStart(3, '0');
     const stamp = b.created_at ? new Date(b.created_at).toLocaleString() : '';
     const left = doc.page.margins.left;
     const right = doc.page.width - doc.page.margins.right;
     const width = right - left;
     const pageBottom = doc.page.height - doc.page.margins.bottom;
 
+    // --- DRAFT watermark -----------------------------------------------------
+    // Drawn first so the booking details sit on top of it. All later writes
+    // position themselves explicitly, so this can't disturb the layout.
+    if (isDraft) {
+      doc.save();
+      // Move the origin to the middle of the page, turn 45°, then draw the
+      // word centred on that origin so it lies corner to corner.
+      doc.translate(doc.page.width / 2, doc.page.height / 2).rotate(-45);
+      doc.opacity(0.16).fillColor('#b45309').font('Helvetica-Bold').fontSize(140)
+        .text('DRAFT', -350, -80, { width: 700, align: 'center', lineBreak: false });
+      doc.opacity(1);
+      doc.restore();
+    }
+
     // --- Header (full width) -------------------------------------------------
     doc.fillColor('#111').font('Helvetica-Bold').fontSize(18)
       .text(b.property_name || PROPERTY_NAME, left, doc.page.margins.top);
-    doc.font('Helvetica').fontSize(10).fillColor('#333')
-      .text('Function Booking Form');
+    doc.font('Helvetica').fontSize(10).fillColor(isDraft ? '#b45309' : '#333')
+      .text(
+        isDraft
+          ? 'Function Booking Form — DRAFT (not submitted)'
+          : 'Function Booking Form'
+      );
 
     const metaLines = [
-      `Booking No ${series}`,
+      isDraft ? 'DRAFT — Booking No pending' : `Booking No ${series}`,
       b.reservation_no ? `Res. No: ${b.reservation_no}` : null,
-      `Submitted by: ${val(b.submitted_by)}`,
+      `${isDraft ? 'Saved' : 'Submitted'} by: ${val(b.submitted_by)}`,
       stamp ? `Timestamp: ${stamp}` : null,
     ].filter(Boolean);
-    doc.fontSize(9).fillColor('#555')
+    doc.fontSize(9).fillColor(isDraft ? '#b45309' : '#555')
       .text(metaLines.join('\n'), left, doc.page.margins.top, { width, align: 'right' });
 
     doc.moveDown(0.5);

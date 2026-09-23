@@ -78,6 +78,13 @@ const REQUIRED = [
   'party_name', 'telephone', 'rate',
 ];
 
+// A booking is either still being written ('draft') or final ('submitted').
+// Drafts skip the required-field checks, hold no series number and are never
+// emailed, so a user can save what they have and finish the form later.
+const BOOKING_STATUSES = ['draft', 'submitted'];
+const isDraftRequest = (body) =>
+  String((body && body.status) || '').trim().toLowerCase() === 'draft';
+
 // --- Mongoose models --------------------------------------------------------
 
 const adminSchema = new mongoose.Schema({
@@ -110,7 +117,13 @@ function seriesNo(n) {
 const bookingSchema = new mongoose.Schema({
   property_code: { type: String, required: true, index: true },
   seq: { type: Number, unique: true, index: true }, // public numeric id
-  series_no: String,
+  series_no: String, // issued on submission only — drafts have none
+  status: {
+    type: String,
+    enum: BOOKING_STATUSES,
+    default: 'submitted',
+    index: true,
+  },
   reservation_no: String,
   submitted_by: { type: String, required: true },
   date: String, time: String, function_type: String, venue: String,
@@ -123,6 +136,8 @@ const bookingSchema = new mongoose.Schema({
   details_amount: String, billing_instruction: String, housekeeping: String,
   fnb: String, kitchen: String,
   created_at: { type: Date, default: Date.now },
+  updated_at: Date,
+  submitted_at: Date,
 });
 
 // Expose `id` = seq and hide Mongo internals in JSON responses.
@@ -288,7 +303,7 @@ app.get(
     const rows = await Booking.find({ property_code: req.propertyCode })
       .sort({ seq: -1 })
       .select(
-        'seq series_no reservation_no submitted_by date time function_type venue party_name telephone created_at'
+        'seq series_no status reservation_no submitted_by date time function_type venue party_name telephone created_at updated_at'
       );
     res.json(rows.map((r) => r.toJSON()));
   })
@@ -309,8 +324,9 @@ app.get(
 
 // Extract + validate booking fields from a request body. Shared by create
 // and update. `checkPastDate` is only enforced on create (an edit may touch a
-// booking whose date has already passed).
-function parseBookingBody(body, { checkPastDate }) {
+// booking whose date has already passed). `draft` relaxes the required-field
+// rules so an unfinished form can still be saved.
+function parseBookingBody(body, { checkPastDate, draft = false }) {
   const data = {};
   for (const key of FIELDS) {
     if (key === 'other_charges') continue;
@@ -323,11 +339,22 @@ function parseBookingBody(body, { checkPastDate }) {
     : [];
 
   const errors = {};
-  for (const key of REQUIRED) {
-    if (!data[key]) errors[key] = 'This field is required.';
-  }
-  if (data.email && (!data.email.includes('@') || !data.email.includes('.'))) {
-    errors.email = 'Enter a valid email address.';
+  if (draft) {
+    // Nothing is mandatory in a draft except something to recognise it by,
+    // so an empty form can't be saved as a blank placeholder.
+    const hasAnyValue =
+      FIELDS.some((key) => key !== 'other_charges' && data[key]) ||
+      otherCharges.length > 0;
+    if (!hasAnyValue) {
+      errors.party_name = 'Fill in at least one detail before saving a draft.';
+    }
+  } else {
+    for (const key of REQUIRED) {
+      if (!data[key]) errors[key] = 'This field is required.';
+    }
+    if (data.email && (!data.email.includes('@') || !data.email.includes('.'))) {
+      errors.email = 'Enter a valid email address.';
+    }
   }
   if (data.date) {
     const today = new Date();
@@ -346,13 +373,18 @@ app.post(
   '/api/bookings',
   authRequired,
   wrap(async (req, res) => {
+    const draft = isDraftRequest(req.body);
     const { data, otherCharges, errors } = parseBookingBody(req.body || {}, {
-      checkPastDate: true,
+      // A draft may well be for a date that has already been keyed in wrongly
+      // or is still being decided — only a real submission is held to it.
+      checkPastDate: !draft,
+      draft,
     });
     if (Object.keys(errors).length > 0) {
       return res.status(400).json({ errors });
     }
 
+    const now = new Date();
     const seq = await nextSeq('bookingSeq');
     const booking = await Booking.create({
       ...data,
@@ -360,15 +392,25 @@ app.post(
       other_charges: otherCharges.join(', '),
       submitted_by: req.session.adminUsername,
       seq,
-      series_no: seriesNo(seq),
-      created_at: new Date(),
+      // Drafts stay out of the official series; the number is issued when the
+      // booking is actually submitted, so the series never has gaps.
+      series_no: draft ? '' : seriesNo(await nextSeq('bookingSeriesNo')),
+      status: draft ? 'draft' : 'submitted',
+      created_at: now,
+      updated_at: now,
+      submitted_at: draft ? undefined : now,
     });
 
     // Email the booking PDF to the internal distribution list. Fire-and-forget:
     // a mail failure must not fail the booking, which is already saved.
-    sendBookingEmail(booking.toJSON());
+    // A draft is not a booking yet, so nothing is sent for it.
+    if (!draft) sendBookingEmail(booking.toJSON());
 
-    res.status(201).json({ id: booking.seq, series_no: booking.series_no });
+    res.status(201).json({
+      id: booking.seq,
+      series_no: booking.series_no,
+      status: booking.status,
+    });
   })
 );
 
@@ -382,21 +424,49 @@ app.put(
     });
     if (!booking) return res.status(404).json({ error: 'Booking not found' });
 
+    const wasDraft = booking.status === 'draft';
+    const keepDraft = isDraftRequest(req.body);
+    if (keepDraft && !wasDraft) {
+      return res
+        .status(400)
+        .json({ error: 'A submitted booking cannot be turned back into a draft.' });
+    }
+
     const { data, otherCharges, errors } = parseBookingBody(req.body || {}, {
       checkPastDate: false,
+      draft: keepDraft,
     });
     if (Object.keys(errors).length > 0) {
       return res.status(400).json({ errors });
     }
 
-    Object.assign(booking, data, { other_charges: otherCharges.join(', ') });
-    await booking.save();
+    Object.assign(booking, data, {
+      other_charges: otherCharges.join(', '),
+      updated_at: new Date(),
+    });
 
-    res.json({ id: booking.seq, series_no: booking.series_no });
+    // Submitting a draft turns it into a real booking: it takes the next
+    // series number and is emailed, exactly like one created in a single go.
+    const submitting = wasDraft && !keepDraft;
+    if (submitting) {
+      booking.status = 'submitted';
+      booking.series_no = seriesNo(await nextSeq('bookingSeriesNo'));
+      booking.submitted_at = new Date();
+    }
+    await booking.save();
+    if (submitting) sendBookingEmail(booking.toJSON());
+
+    res.json({
+      id: booking.seq,
+      series_no: booking.series_no,
+      status: booking.status,
+    });
   })
 );
 
 // Download the booking as a single-page A4 PDF (same layout that is emailed).
+// Drafts can be downloaded too — the PDF itself is stamped DRAFT so a working
+// copy can never be mistaken for a confirmed booking.
 app.get(
   '/api/bookings/:id/pdf',
   authRequired,
@@ -412,8 +482,11 @@ app.get(
       ...b,
       property_name: req.propertyProfile.displayName,
     });
-    const series = b.series_no || String(b.seq).padStart(3, '0');
-    const fileName = `Booking-${series}-${(b.party_name || 'party')
+    const label =
+      b.status === 'draft'
+        ? `Draft-${b.seq}`
+        : `Booking-${b.series_no || String(b.seq).padStart(3, '0')}`;
+    const fileName = `${label}-${(b.party_name || 'party')
       .replace(/[^\w\-]+/g, '_')
       .slice(0, 40)}.pdf`;
 
@@ -434,6 +507,12 @@ app.post(
       property_code: req.propertyCode,
     });
     if (!booking) return res.status(404).json({ error: 'Booking not found' });
+    if (booking.status === 'draft') {
+      return res.status(400).json({
+        ok: false,
+        error: 'This is still a draft. Submit it first to email it.',
+      });
+    }
 
     const result = await sendBookingEmail(booking.toJSON());
     if (result.sent) {
@@ -472,6 +551,22 @@ async function main() {
   await Booking.updateMany(
     { property_code: { $exists: false } },
     { $set: { property_code: 'centre_point_amravati' } }
+  );
+
+  // Every record that predates drafts is a real submission.
+  await Booking.updateMany(
+    { status: { $exists: false } },
+    { $set: { status: 'submitted' } }
+  );
+
+  // Series numbers used to be derived from the booking counter itself. Seed
+  // the new dedicated counter from it once so numbering carries on from where
+  // it left off instead of restarting at 001.
+  const bookingCounter = await Counter.findById('bookingSeq');
+  await Counter.updateOne(
+    { _id: 'bookingSeriesNo' },
+    { $setOnInsert: { seq: bookingCounter ? bookingCounter.seq : 0 } },
+    { upsert: true }
   );
 
   const server = http.createServer(app);
